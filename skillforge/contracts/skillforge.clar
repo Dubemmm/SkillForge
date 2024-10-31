@@ -4,6 +4,8 @@
 (define-constant ERR-ALREADY-VERIFIED (err u102))
 (define-constant ERR-NOT-MENTOR (err u103))
 (define-constant ERR-INVALID-PATH (err u104))
+(define-constant ERR-INVALID-INPUT (err u105))
+(define-constant ERR-MENTOR-ALREADY-REGISTERED (err u106))
 
 ;; Data variables
 (define-non-fungible-token skill-token uint)
@@ -44,11 +46,37 @@
 (define-data-var skill-nonce uint u0)
 (define-data-var path-nonce uint u0)
 
+;; Helper functions
+(define-private (validate-string (input (string-ascii 256)) (max-length uint))
+    (< (len input) max-length)
+)
+
+(define-private (validate-required-skills (skill-list (list 20 uint)))
+    (<= (len skill-list) u20)
+)
+
+;; Read-only functions
+(define-read-only (get-mentor (address principal))
+    (map-get? mentors address)
+)
+
+(define-read-only (get-skill (skill-id uint))
+    (map-get? skills skill-id)
+)
+
+(define-read-only (get-skill-path (path-id uint))
+    (map-get? skill-paths path-id)
+)
+
+(define-read-only (get-token-uri (token-id uint))
+    (ok none)
+)
+
 ;; Authorization
 (define-public (register-mentor)
     (let
         ((caller tx-sender))
-        (asserts! (is-none (get-mentor caller)) (err u105))
+        (asserts! (is-none (get-mentor caller)) ERR-MENTOR-ALREADY-REGISTERED)
         (ok (map-set mentors 
             caller
             {
@@ -68,8 +96,12 @@
         ((skill-id (+ (var-get skill-nonce) u1))
          (caller tx-sender))
         
+        ;; Validate inputs
+        (asserts! (validate-string name u50) ERR-INVALID-INPUT)
+        (asserts! (validate-string description u256) ERR-INVALID-INPUT)
+        
         ;; Verify path exists
-        (asserts! (is-some (map-get? skill-paths path-id)) (err u104))
+        (asserts! (is-some (map-get? skill-paths path-id)) ERR-INVALID-PATH)
         
         ;; Mint NFT
         (try! (nft-mint? skill-token skill-id caller))
@@ -135,6 +167,11 @@
         ((path-id (+ (var-get path-nonce) u1))
          (caller tx-sender))
         
+        ;; Validate inputs
+        (asserts! (validate-string name u50) ERR-INVALID-INPUT)
+        (asserts! (validate-string description u256) ERR-INVALID-INPUT)
+        (asserts! (validate-required-skills required-skills) ERR-INVALID-INPUT)
+        
         (map-set skill-paths
             path-id
             {
@@ -150,27 +187,11 @@
     )
 )
 
-;; Read-only functions
-(define-read-only (get-skill (skill-id uint))
-    (map-get? skills skill-id)
-)
-
-(define-read-only (get-skill-path (path-id uint))
-    (map-get? skill-paths path-id)
-)
-
-(define-read-only (get-mentor (address principal))
-    (map-get? mentors address)
-)
-
-(define-read-only (get-token-uri (token-id uint))
-    (ok none)
-)
-
 ;; NFT trait implementation
 (define-public (transfer (token-id uint) (sender principal) (recipient principal))
     (begin
         (asserts! (is-eq tx-sender sender) ERR-NOT-AUTHORIZED)
+        (asserts! (is-some (nft-get-owner? skill-token token-id)) ERR-INVALID-SKILL)
         (nft-transfer? skill-token token-id sender recipient)
     )
 )
